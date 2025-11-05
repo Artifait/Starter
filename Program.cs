@@ -29,10 +29,12 @@ builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>
     {
-        policy.AllowAnyHeader().AllowAnyMethod().AllowCredentials().AllowAnyOrigin();
+        policy
+            .AllowAnyHeader()
+            .AllowAnyMethod()
+            .AllowAnyOrigin();
     });
 });
-
 
 var app = builder.Build();
 
