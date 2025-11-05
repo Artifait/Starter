@@ -1,0 +1,68 @@
+name: Build and Deploy Starter
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/starter:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/starter:${{ github.run_number }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to remote server via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SERVER_SSH_HOST }}
+          username: ${{ secrets.SERVER_SSH_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          port: ${{ secrets.SERVER_SSH_PORT || '22' }}
+          script: |
+            IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/starter:latest
+            TARGET_DIR="/home/${{ secrets.SERVER_SSH_USER }}/starter"
+            DATA_DIR="$TARGET_DIR/data"
+
+            mkdir -p "$DATA_DIR"
+
+            docker pull $IMAGE
+
+            docker stop starter-app || true
+            docker rm starter-app || true
+
+            docker run -d \
+              --name starter-app \
+              --restart=always \
+              -p 80:8080 \
+              -v "$DATA_DIR":/app/data \
+              -e DOTNET_ENVIRONMENT=Production \
+              -e DATA_SOURCE="Data Source=/app/data/starter.db" \
+              -e JWT_SECRET="${{ secrets.APP_JWT_SECRET }}" \
+              -e HMAC_SECRET="${{ secrets.APP_HMAC_SECRET }}" \
+              $IMAGE
+
+            docker ps --filter "name=starter-app" --format "table {{.Names}}\t{{.Image}}\t{{.Ports}}"

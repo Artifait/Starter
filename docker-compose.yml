@@ -1,0 +1,15 @@
+version: '3.8'
+services:
+  starter:
+    image: yourdockerhubuser/starter:latest
+    build: .
+    environment:
+      - DOTNET_ENVIRONMENT=Production
+      - DATA_SOURCE=Data Source=/app/data/starter.db
+      - JWT_SECRET=${JWT_SECRET}
+      - HMAC_SECRET=${HMAC_SECRET}
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/app/data
+    restart: always
