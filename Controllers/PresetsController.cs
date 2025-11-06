@@ -1,5 +1,6 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.Logging;
 using Starter.Data;
 using Starter.Hubs;
 using Starter.Models;
@@ -12,14 +13,17 @@ public class PresetsController : ControllerBase
 {
     private readonly StarterDbContext _db;
     private readonly IHubContext<RoomHub> _hub;
+    private readonly ILogger<PresetsController> _logger;
 
-    public PresetsController(StarterDbContext db, IHubContext<RoomHub> hub)
+    public PresetsController(StarterDbContext db, IHubContext<RoomHub> hub, ILogger<PresetsController> logger)
     {
-        _db = db; _hub = hub;
+        _db = db;
+        _hub = hub;
+        _logger = logger;
     }
 
     [HttpPost]
-    public IActionResult CreatePreset(string roomId, [FromBody] CreatePresetDto dto)
+    public async Task<IActionResult> CreatePreset(string roomId, [FromBody] CreatePresetDto dto)
     {
         var preset = new Preset
         {
@@ -35,8 +39,16 @@ public class PresetsController : ControllerBase
         _db.Presets.Add(preset);
         _db.SaveChanges();
 
-        // Notify PC clients in room about new preset (optional)
-        _hub.Clients.Group(roomId).SendAsync("preset.created", new { presetId = preset.PresetId, name = preset.Name });
+        // Notify PC clients in room about new preset (optional) — логируем отправку
+        try
+        {
+            await _hub.Clients.Group(roomId).SendAsync("preset.created", new { presetId = preset.PresetId, name = preset.Name });
+            _logger.LogInformation("preset.created sent to group {roomId} for preset {presetId}", roomId, preset.PresetId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to send preset.created to group {roomId} for preset {presetId}", roomId, preset.PresetId);
+        }
 
         return Created($"/api/v1/rooms/{roomId}/presets/{preset.PresetId}", new { presetId = preset.PresetId });
     }
@@ -109,13 +121,40 @@ public class PresetsController : ControllerBase
             command = preset.Command,
             args = preset.ArgsJson == null ? new string[0] : System.Text.Json.JsonSerializer.Deserialize<string[]>(preset.ArgsJson),
             workDir = preset.WorkDir,
-            meta = new { requestedBy = "mobile" }
+            meta = new { requestedBy = "mobile", requestId = dto?.RequestId }
         };
 
-        // Send over SignalR to room group
-        await _hub.Clients.Group(roomId).SendAsync("preset.run", payload);
+        // Send over SignalR to room group and log result
+        try
+        {
+            await _hub.Clients.Group(roomId).SendAsync("preset.run", payload);
+            _logger.LogInformation("preset.run sent to group {roomId} for exec {execId} (preset {presetId})", roomId, exec.ExecutionId, preset.PresetId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to send preset.run to group {roomId} for exec {execId}", roomId, exec.ExecutionId);
+            // We still return Accepted because execution record created; consider queueing or marking failed if desired
+        }
 
         return Accepted(new { executionId = exec.ExecutionId });
+    }
+
+    // Debug endpoint: отправить тестовое сообщение в группу (полезно для проверки delivery)
+    [HttpPost("debug/broadcast")]
+    public async Task<IActionResult> BroadcastTest(string roomId)
+    {
+        var payload = new { test = "hello", ts = DateTime.UtcNow, from = "admin" };
+        try
+        {
+            await _hub.Clients.Group(roomId).SendAsync("preset.run", payload);
+            _logger.LogInformation("Debug broadcast sent to group {roomId}", roomId);
+            return Ok(new { sent = true });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed debug broadcast to group {roomId}", roomId);
+            return StatusCode(500, new { error = "broadcast_failed", message = ex.Message });
+        }
     }
 }
 
