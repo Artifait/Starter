@@ -41,6 +41,47 @@ public class PresetsController : ControllerBase
         return Created($"/api/v1/rooms/{roomId}/presets/{preset.PresetId}", new { presetId = preset.PresetId });
     }
 
+    [HttpGet]
+    public IActionResult GetPresets(string roomId)
+    {
+        // возвращаем все пресеты для комнаты
+        var list = _db.Presets
+            .Where(p => p.RoomId == roomId)
+            .OrderByDescending(p => p.CreatedAt)
+            .Select(p => new
+            {
+                p.PresetId,
+                p.RoomId,
+                p.Name,
+                p.Command,
+                p.ArgsJson,
+                p.WorkDir,
+                p.RequiresConfirmation,
+                p.CreatedAt
+            })
+            .ToList();
+
+        return Ok(list);
+    }
+
+    [HttpGet("{presetId}")]
+    public IActionResult GetPreset(string roomId, string presetId)
+    {
+        var preset = _db.Presets.FirstOrDefault(p => p.RoomId == roomId && p.PresetId == presetId);
+        if (preset == null) return NotFound();
+        return Ok(new
+        {
+            preset.PresetId,
+            preset.RoomId,
+            preset.Name,
+            preset.Command,
+            preset.ArgsJson,
+            preset.WorkDir,
+            preset.RequiresConfirmation,
+            preset.CreatedAt
+        });
+    }
+
     [HttpPost("{presetId}/run")]
     public async Task<IActionResult> RunPreset(string roomId, string presetId, [FromBody] RunPresetDto? dto)
     {
